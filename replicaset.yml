@@ -1,0 +1,21 @@
+apiversion: v2
+kind: Replicaset
+metadata:
+  name: my-replicaset
+  lables:
+    app: my-app
+    type: frontend
+    environment: dev
+spec:
+  replicas: 5
+  selector:
+    matchlables:
+    app: my-app
+    type: frontend
+    environment: dev
+    spec:
+      containers:
+      - name: nginx-cont
+        image: nginx:latest
+      - name: redis-cont
+        image: redis:latest
