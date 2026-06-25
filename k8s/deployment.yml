@@ -1,31 +1,42 @@
 apiVersion: apps/v1
 kind: Deployment
-
 metadata:
   name: my-deployment
   labels:
     app: my-app
     type: frontend
     environment: dev
-
 spec:
   replicas: 5
-
   selector:
     matchLabels:
       app: my-app
       type: frontend
       environment: dev
-
   template:
     metadata:
       labels:
         app: my-app
         type: frontend
         environment: dev
-
     spec:
       containers:
       - name: nginx-cont
         image: nginx:latest
-  
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+spec:
+  selector:
+    app: my-app
+    type: frontend
+    environment: dev
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+  type: ClusterIP
