@@ -1,0 +1,24 @@
+#alert for threshold exceeding 80%
+#!/bin/bash
+
+THRESHOLD=80
+
+USAGE=$(df -h / | awk 'NR==2 {gsub("%",""); print $5}') #gsub means Global Substitute it replace 80% - 80 
+
+if [ "$USAGE" -ge "$THRESHOLD" ]; then # -ge = Greater than or Equal to (≥)
+    echo "Disk usage is ${USAGE}%" | mail -s "Disk Usage Alert" admin@example.com
+fi
+
+
+
+
+# alert for disk space remaining 5gb
+#!/bin/bash
+
+FREE=$(df -BG / | awk 'NR==2 {gsub("G",""); print $4}') #Using -BG forces df to display disk space in gigabytes, which makes it easier to compare free space against a threshold like 5 GB in a shell script.
+
+if [ "$FREE" -lt 5 ]; then
+    echo "ALERT: Free disk space is only ${FREE}GB"
+else
+    echo "Free disk space is ${FREE}GB"
+fi
