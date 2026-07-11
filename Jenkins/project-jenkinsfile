@@ -1,20 +1,28 @@
 pipeline {
     agent any
-
     environment {
-        SCANNER_HOME = tool 'sonar-scanner'
-        NVD_API_KEY = credentials('nvd-api-key')  // Jenkins secret text credential
+        SCANNER_HOME   = tool 'sonar-scanner'
+        NVD_API_KEY    = credentials('nvd-api-key')
+        AWS_ACCOUNT_ID = '123456789012'                 // <-- replace with your AWS account ID
+        AWS_REGION     = 'ap-south-1'
+        ECR_REPO       = 'ekart'                        // <-- your ECR repo name
+        ECR_REGISTRY   = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
     }
-
     tools {
         maven 'maven3'
         jdk 'jdk-17'
     }
-
     stages {
+
         stage('git checkout') {
             steps {
                 git branch: 'master', url: 'https://github.com/pratik-zende88/Jenkins-EKS-Project.git'
+                script {
+                    // short git commit hash for unique, traceable image tags
+                    env.GIT_COMMIT_SHORT = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+                    env.IMAGE_TAG = "${env.BUILD_NUMBER}-${env.GIT_COMMIT_SHORT}"
+                    echo "Image will be tagged as: ${env.IMAGE_TAG}"
+                }
             }
         }
 
@@ -43,11 +51,11 @@ pipeline {
 
         stage('OWASP Dependency Check') {
             steps {
-                  withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
+                withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')]) {
                     dependencyCheck additionalArguments: "--nvdApiKey=$NVD_API_KEY",
-                                    odcInstallation: 'DC'
-             }
-        }
+                                     odcInstallation: 'DC'
+                }
+            }
         }
 
         stage('Build') {
@@ -63,39 +71,58 @@ pipeline {
                 }
             }
         }
-        
 
-        stage('build and Tag docker image') {
+        stage('Build and Tag docker image') {
             steps {
                 script {
-                        sh "docker build -t youngminds73/ekart:latest -f docker/Dockerfile ."
-                    }
+                    sh """
+                        docker build -t ${ECR_REPO}:${IMAGE_TAG} -f docker/Dockerfile .
+                        docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                        docker tag ${ECR_REPO}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO}:latest
+                    """
+                }
             }
         }
 
-        stage('Push image to Hub'){
-            steps{
-                script{
-                   withCredentials([string(credentialsId: 'dockerhub-pwd', variable: 'dockerhubpwd')]) {
-                   sh 'docker login -u youngminds73 -p ${dockerhubpwd}'}
-                   sh 'docker push youngminds73/ekart:latest'
+        stage('Push image to ECR') {
+            steps {
+                script {
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-creds']]) {
+                        sh """
+                            aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                            docker push ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                            docker push ${ECR_REGISTRY}/${ECR_REPO}:latest
+                        """
+                    }
                 }
             }
         }
-        stage('EKS and Kubectl configuration'){
-            steps{
-                script{
-                    sh 'aws eks update-kubeconfig --region ap-south-1 --name project-cluster'
+
+        stage('EKS and Kubectl configuration') {
+            steps {
+                script {
+                    sh "aws eks update-kubeconfig --region ${AWS_REGION} --name project-cluster"
                 }
             }
         }
-        stage('Deploy to k8s'){
-            steps{
-                script{
-                    sh 'kubectl apply -f deploymentservice.yml'
+
+        stage('Update image tag in manifest') {
+            steps {
+                script {
+                    sh """
+                        export IMAGE=${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                        envsubst < deploymentservice.yml > deploy-final.yml
+                    """
+                }
+            }
+        }
+
+        stage('Deploy to k8s') {
+            steps {
+                script {
+                    sh "kubectl apply -f deploy-final.yml"
                 }
             }
         }
     }
-
 }
